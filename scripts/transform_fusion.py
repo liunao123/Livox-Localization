@@ -27,6 +27,10 @@ def pose_to_mat(pose_msg):
 def transform_fusion():
     global cur_odom_to_baselink, cur_map_to_odom
 
+
+    filename = '/root/Desktop/locate_ws/livox_locate.txt'
+    open(filename,'w')
+
     br = tf.TransformBroadcaster()
     while True:
         time.sleep(1 / FREQ_PUB_LOCALIZATION)
@@ -58,7 +62,10 @@ def transform_fusion():
             localization.child_frame_id = 'body'
             # rospy.loginfo_throttle(1, '{}'.format(np.matmul(T_map_to_odom, T_odom_to_base_link)))
             pub_localization.publish(localization)
-
+            str_temp = str(cur_odom.header.stamp.to_sec())  + ' ' + str(Point(*xyz).x) + ' ' + str(Point(*xyz).y) + ' ' + str(Point(*xyz).z) + ' '+ str( Quaternion(*quat).x) + ' '+ str( Quaternion(*quat).y) + ' ' + str( Quaternion(*quat).z) + ' ' + str( Quaternion(*quat).w)
+            with open(filename,'a') as f: # 如果filename不存在会自动创建， 'w'表示写数据，写之前会清空文件中的原有数据！
+                f.write(str_temp + "\n")
+            f.close()
 
 def cb_save_cur_odom(odom_msg):
     global cur_odom_to_baselink
@@ -72,7 +79,7 @@ def cb_save_map_to_odom(odom_msg):
 
 if __name__ == '__main__':
     # tf and localization publishing frequency (HZ)
-    FREQ_PUB_LOCALIZATION = 50
+    FREQ_PUB_LOCALIZATION = 10
 
     rospy.init_node('transform_fusion')
     rospy.loginfo('Transform Fusion Node Inited...')

@@ -1,5 +1,9 @@
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+
 import numpy as np
-import os
+import os, sys
 from utils import kdtree
 
 np.set_printoptions(precision=4)
@@ -108,38 +112,91 @@ class ScanContextManager:
         se3 = np.eye(4)
         with open(pose_file, "r") as f:
             for i, line in enumerate(f):
-                result = [ele for ele in line.split(" ") if ele.strip()]
-                se3[i, 0] = float(result[0])
-                se3[i, 1] = float(result[1])
-                se3[i, 2] = float(result[2])
-                se3[i, 3] = float(result[3])
+                # print("line: ", line)
+                if(i > 1 and i < 6):
+                    result = [ele for ele in line.split(" ") if ele.strip()]
+                    se3[i-2, 0] = float(result[0])
+                    se3[i-2, 1] = float(result[1])
+                    se3[i-2, 2] = float(result[2])
+                    se3[i-2, 3] = float(result[3])
         return se3
+
+    def livox_load_pc_make_sc_from_pose_graph(self, pc_path):
+        import open3d as o3d
+        # 从 interactive_slam 的文件路夹下读取文件
+        pose_grap_path = os.path.join(pc_path + 'pose_graph')
+        path_list = os.listdir(pose_grap_path)
+        path_list = sorted(path_list) #升序排序
+
+        node_idx = 0
+        for i in range(0, len(path_list) ):
+        # for i in range(0, 200 ):
+            path = os.path.join(pose_grap_path , path_list[i]) # 构造路径
+            print("now loading path is:", path, i*100.0 / len(path_list)  )
+            if os.path.isdir(path):
+                pass
+            elif os.path.isfile(path): #最后一个graph.g2o文件不要
+                continue
+
+            full_path = os.path.join(path + '/cloud.pcd')
+            # 读pcd文件，加进去
+            pc_numpy = np.asarray(o3d.io.read_point_cloud(filename=full_path).points)
+            self.add_node(node_idx, pc_numpy)
+
+            # 保存 SC 相关的数据
+            npy_file_name = os.path.join(pc_path + 'SC/pcd_npy', "pc_" + str(node_idx) + ".npy")
+            # print("npy_file_name is :", npy_file_name)
+            np.save(npy_file_name, pc_numpy)
+
+            pose_name = path + '/data' #加载odom数据
+            # print("pose_name is :", pose_name)
+            pose_se3 = ScanContextManager.livox_load_odom_pose(pose_name)
+            self.poses[node_idx] = pose_se3
+
+            node_idx += 1
+
+        print("155 pc_files len is :", len(path_list) )
+        self.save()
+
 
     def livox_load_pc_make_sc(self, pc_path):
         import open3d as o3d
 
         pc_files = [f for f in os.listdir(pc_path) if ".pcd" in f]
         pc_files = sorted(pc_files, key=lambda pc_file: int(
-            pc_file[:pc_file.find("_")]))
+            pc_file[:pc_file.find(".")]))
+        print("128 pc_files len is :", len(pc_files))
+        
 
         odom_files = [f for f in os.listdir(pc_path) if ".odom" in f]
         odom_files = sorted(odom_files, key=lambda odom_file: int(
-            odom_file[:odom_file.find("_")]))
+            odom_file[:odom_file.find(".")]))
+        print("134 odom_files len is :", len(odom_files))
 
         pcd_npy_folder = os.path.join(self.file_path, "pcd_npy")
         if not os.path.exists(pcd_npy_folder):
             os.makedirs(pcd_npy_folder)
+        print("full_path is :")
 
-        node_idx = 0
-        for pc, pose_name in zip(pc_files, odom_files):
-            full_path = os.path.join(pc_path, pc)
+        node_idx = 1
+        # for pc, pose_name in zip(pc_files, odom_files):
+        for x in range(22000):
+            full_path = os.path.join(pc_path, str(node_idx) + '.pcd')
+            print("146 full_path is :", full_path)
+
             pc_numpy = np.asarray(o3d.io.read_point_cloud(filename=full_path).points)
             self.add_node(node_idx, pc_numpy)
+            print("146 full_path is :", full_path)
 
             npy_file_name = os.path.join(pcd_npy_folder, "pc_" + str(node_idx) + ".npy")
             np.save(npy_file_name, pc_numpy)
 
+            pose_name = os.path.join(pc_path, str(node_idx) + '.odom')
+            print("pose_name is :", pose_name)
+
             pose_file = os.path.join(pc_path, pose_name)
+            print("pose_name is :", pose_name)
+
             pose_se3 = ScanContextManager.livox_load_odom_pose(pose_file)
             self.poses[node_idx] = pose_se3
             node_idx += 1
@@ -154,7 +211,7 @@ class ScanContextManager:
 
         self.load_sc(sc_path)
         self.load_ring_key(rk_path)
-        print("Load SC and RK successfully!")
+        print("----------------------------Load SC and RK successfully!--------------------")
 
     def __query_loop_closure(self, query_scan_context, query_ring_key, curr_idx):
 
@@ -244,7 +301,8 @@ class ScanContextManager:
         for i in range(self.curr_node_idx + 1):
             rk_file_name = "rk_" + str(i) + ".npy"
             np.save(os.path.join(ring_key_path, rk_file_name),
-                    self.ring_keys[i].ring_key)
+                    self.ring_keys[i])
+            # print("i is: ", i)            
 
     def load_ring_key(self, ring_key_path=None):
         if ring_key_path is None:

@@ -22,6 +22,8 @@ global_map = None
 initialized = False
 T_map_to_odom = np.eye(4)
 cur_odom = None
+last_cur_odom_stamp = 0
+
 cur_scan = None
 
 
@@ -123,10 +125,17 @@ def crop_global_map_in_FOV(global_map, pose_estimation, cur_odom):
 
 
 def global_localization(pose_estimation):
-    global global_map, cur_scan, cur_odom, T_map_to_odom
+    global global_map, cur_scan, cur_odom, T_map_to_odom, last_cur_odom_stamp
     # 用icp配准
     # print(global_map, cur_scan, T_map_to_odom)
-    rospy.loginfo('Global localization by scan-to-map matching......')
+    if last_cur_odom_stamp != cur_odom.header.stamp:
+        pass
+    else:
+        return False
+
+    last_cur_odom_stamp = cur_odom.header.stamp
+
+    # rospy.loginfo('Global localization by scan-to-map matching......')
 
     # TODO 这里注意线程安全
     scan_tobe_mapped = copy.copy(cur_scan)
@@ -138,14 +147,13 @@ def global_localization(pose_estimation):
 
     # 粗配准
     transformation, _ = registration_at_scale(
-        scan_tobe_mapped, global_map_in_FOV, initial=pose_estimation, scale=5)
+        scan_tobe_mapped, global_map_in_FOV, initial=pose_estimation, scale=15)
 
     # 精配准
     transformation, fitness = registration_at_scale(scan_tobe_mapped, global_map_in_FOV, initial=transformation,
                                                     scale=1)
     toc = time.time()
-    rospy.loginfo('Time: {}'.format(toc - tic))
-    rospy.loginfo('')
+    # rospy.loginfo('Time: {}'.format(toc - tic))
 
     # 当全局定位成功时才更新map2odom
     if fitness > LOCALIZATION_TH:
@@ -211,7 +219,7 @@ def cb_save_cur_scan(pc_msg):
 
 def thread_localization():
     global T_map_to_odom
-    while True:
+    while not rospy.is_shutdown():
         # 每隔一段时间进行全局定位
         rospy.sleep(1 / FREQ_LOCALIZATION)
         global_localization(T_map_to_odom)
@@ -222,11 +230,11 @@ if __name__ == '__main__':
     SCAN_VOXEL_SIZE = 0.1
 
     # Global localization frequency (HZ)
-    FREQ_LOCALIZATION = 0.5
+    FREQ_LOCALIZATION = 2
 
     # The threshold of global localization,
     # only those scan2map-matching with higher fitness than LOCALIZATION_TH will be taken
-    LOCALIZATION_TH = 0.95
+    LOCALIZATION_TH = 0.9
 
     # FOV(rad), modify this according to your LiDAR type
     FOV = 1.6
@@ -236,6 +244,7 @@ if __name__ == '__main__':
 
     rospy.init_node('fast_lio_localization')
     rospy.loginfo('Localization Node Inited...')
+    last_cur_odom_stamp = rospy.Time.from_sec(0)
 
     # publisher
     pub_pc_in_map = rospy.Publisher(
@@ -252,18 +261,19 @@ if __name__ == '__main__':
     initialize_global_map(rospy.wait_for_message('/map', PointCloud2))
 
     # NOTE Modify your ScanContext file path HERE!
-    file_path = "/root/data_pc/route_1210/around_building"
+    # file_path = "/root/data_pc/route_1210/around_building"
+    file_path = "/home/map/1008_2735/SC"
     livox_sc = ScanContextManager(file_path=file_path)
     livox_sc.livox_load_sc_rk()
 
-    while not initialized:
-        # rospy.logwarn('Waiting for initial pose....')
-
+    rospy.logwarn('Waiting for initial pose....')
+    while not initialized and not rospy.is_shutdown():
         # wait for initial pose information
         if cur_scan:
             initial_pose = livox_sc.initialization(np.asarray(cur_scan.points))
             if initial_pose is not None:
                 initialized = global_localization(initial_pose)
+                rospy.loginfo('------------------------------')
 
     rospy.loginfo('')
     rospy.loginfo('Initialize successfully!!!!!!')
