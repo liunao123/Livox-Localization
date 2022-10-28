@@ -11,11 +11,12 @@ import rospy
 import ros_numpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, Point, Quaternion
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2 
 import numpy as np
-import tf
 import tf.transformations
 
+import PyKDL
+import math
 from scan_context_manager import ScanContextManager
 
 global_map = None
@@ -168,11 +169,12 @@ def global_localization(pose_estimation):
         map_to_odom.header.stamp = cur_odom.header.stamp
         map_to_odom.header.frame_id = 'map'
         pub_map_to_odom.publish(map_to_odom)
+        rospy.loginfo('success: fitness score:{}'.format(fitness))
         return True
     else:
         rospy.logwarn('Not match!!!!')
         rospy.logwarn('{}'.format(transformation))
-        rospy.logwarn('fitness score:{}'.format(fitness))
+        rospy.logwarn('failed: fitness score:{}'.format(fitness))
         return False
 
 
@@ -198,6 +200,53 @@ def cb_save_cur_odom(odom_msg):
     global cur_odom
     cur_odom = odom_msg
 
+
+def quat_to_angle(quat):
+  rot = PyKDL.Rotation.Quaternion(quat.x, quat.y, quat.z, quat.w)
+  rospy.loginfo( 'yaw is. %f', rot.GetRPY()[2] )
+  return rot.GetRPY()[2]
+
+def cb_initialpose(init_pose_map):
+    global cur_odom
+    if cur_odom is not None:
+      vfirst = [0,0,0]
+      vsecond = [0,0,0]
+      if False:
+        vfirst[0] = init_pose_map.pose.pose.position.x
+        vfirst[1] = init_pose_map.pose.pose.position.y
+        vfirst[2] = quat_to_angle(init_pose_map.pose.pose.orientation)  
+        vsecond[0] = cur_odom.pose.pose.position.x
+        vsecond[1] = cur_odom.pose.pose.position.y
+        vsecond[2] = quat_to_angle(cur_odom.pose.pose.orientation)
+      else:
+        vfirst[0] = cur_odom.pose.pose.position.x
+        vfirst[1] = cur_odom.pose.pose.position.y
+        vfirst[2] = quat_to_angle(cur_odom.pose.pose.orientation)  
+        vsecond[0] = init_pose_map.pose.pose.position.x
+        vsecond[1] = init_pose_map.pose.pose.position.y
+        vsecond[2] = quat_to_angle(init_pose_map.pose.pose.orientation)
+
+      dtheta = vfirst[2] - vsecond[2]
+      rospy.loginfo( 'dt yaw is. %f', dtheta )
+      ct = math.cos(dtheta)
+      st = math.sin(dtheta)
+      x = vfirst[0] - (vsecond[0] * ct  - vsecond[1] * st)
+      y = vfirst[1] - (vsecond[0] * st  + vsecond[1] * ct)
+      map_to_odom = Odometry()
+      map_to_odom.pose.pose.position = Point( x, y, 0 )
+
+      q = tf.transformations.quaternion_from_euler(0, 0, dtheta)      
+      map_to_odom.pose.pose.orientation.x = q[0]
+      map_to_odom.pose.pose.orientation.y = q[1]
+      map_to_odom.pose.pose.orientation.z = q[2]
+      map_to_odom.pose.pose.orientation.w = q[3]
+
+      map_to_odom.header.stamp = cur_odom.header.stamp
+      map_to_odom.header.frame_id = 'map'
+      rospy.logwarn('pub map_to_odom. ')
+      pub_map_to_odom.publish(map_to_odom)
+    else:
+      rospy.logerr('odom< lidar data > is not get. wait please . ')
 
 def cb_save_cur_scan(pc_msg):
     global cur_scan
@@ -255,6 +304,8 @@ if __name__ == '__main__':
     rospy.Subscriber('/cloud_registered', PointCloud2,
                      cb_save_cur_scan, queue_size=1)
     rospy.Subscriber('/Odometry', Odometry, cb_save_cur_odom, queue_size=1)
+
+    rospy.Subscriber('/initialpose', PoseWithCovarianceStamped, cb_initialpose, queue_size=1)
 
     # Load the global map
     rospy.logwarn('Waiting for global map......')
